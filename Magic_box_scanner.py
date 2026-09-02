@@ -61,6 +61,7 @@ def fetch_eurusd_data():
         "interval": TIMEFRAME,
         "limit": 200
     }
+
     
     try:
         response = requests.get(url, params=params)
