@@ -57,11 +57,10 @@ def fetch_eurusd_data():
     """دریافت داده EURUSDT از Binance"""
     url = "https://api.binance.com/api/v3/klines"
     params = {
-        "symbol": SYMBOL,
-        "interval": TIMEFRAME,
+        "symbol": "EURUSDT",
+        "interval": "15m",
         "limit": 200
     }
-
     
     try:
         response = requests.get(url, params=params)
@@ -71,11 +70,11 @@ def fetch_eurusd_data():
         for candle in data:
             candles.append({
                 "time": datetime.fromtimestamp(candle[0]/1000, tz=timezone.utc),
-                "open": float(candle[1]),
-                "high": float(candle[2]),
-                "low": float(candle[3]),
-                "close": float(candle[4]),
-                "volume": float(candle[5])
+                "open": float(candle[1]),  # حتماً به float تبدیل کن
+                "high": float(candle[2]),  # حتماً به float تبدیل کن
+                "low": float(candle[3]),   # حتماً به float تبدیل کن
+                "close": float(candle[4]), # حتماً به float تبدیل کن
+                "volume": float(candle[5]) # حتماً به float تبدیل کن
             })
         
         return candles
