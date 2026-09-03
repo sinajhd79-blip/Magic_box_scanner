@@ -8,40 +8,34 @@ from datetime import datetime, timedelta, timezone
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 
-# NY Timezone
-NY_TZ = timezone(timedelta(hours=-4))  # EDT
+NY_TZ = timezone(timedelta(hours=-4))
 
 # ============================================================
 # توابع کمکی
 # ============================================================
 def to_ny_time(dt):
-    """تبدیل به زمان نیویورک"""
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(NY_TZ)
 
 def is_in_asia_session(dt):
-    """بررسی سشن آسیا (00:00 تا 09:00 NY)"""
     ny_dt = to_ny_time(dt)
     return 0 <= ny_dt.hour < 9
 
 def is_in_mbox(dt):
-    """بررسی MBOX (18:00 تا 02:00 NY)"""
     ny_dt = to_ny_time(dt)
     return ny_dt.hour >= 18 or ny_dt.hour < 2
 
 def is_in_shred_time(dt):
-    """بررسی SHRED time (02:00 تا 03:00 NY)"""
     ny_dt = to_ny_time(dt)
     return (ny_dt.hour == 2 or (ny_dt.hour == 3 and ny_dt.minute <= 5))
 
 def is_scanning_time(dt):
-    """بررسی زمان اسکن (02:00 تا 12:00 NY)"""
     ny_dt = to_ny_time(dt)
     return 2 <= ny_dt.hour < 12
 
 # ============================================================
-# دریافت داده
+# دریافت داده - نسخه اصلاح شده
 # ============================================================
 def fetch_eurusd_data():
     """دریافت داده EURUSDT از Binance"""
@@ -53,33 +47,47 @@ def fetch_eurusd_data():
             "limit": 200
         }
         
+        print("📡 Fetching data from Binance...")
         response = requests.get(url, params=params, timeout=10)
         data = response.json()
         
+        print(f"✅ Received {len(data)} candles")
+        
         candles = []
         for candle in data:
+            # تبدیل صریح به انواع درست
+            timestamp = int(candle[0])  # تبدیل به int
+            open_price = float(candle[1])
+            high = float(candle[2])
+            low = float(candle[3])
+            close = float(candle[4])
+            volume = float(candle[5])
+            
             candles.append({
-                "time": datetime.fromtimestamp(candle[0]/1000, tz=timezone.utc),
-                "open": float(candle[1]),
-                "high": float(candle[2]),
-                "low": float(candle[3]),
-                "close": float(candle[4]),
-                "volume": float(candle[5])
+                "time": datetime.fromtimestamp(timestamp/1000, tz=timezone.utc),
+                "open": open_price,
+                "high": high,
+                "low": low,
+                "close": close,
+                "volume": volume
             })
         
+        print(f"✅ Processed {len(candles)} candles")
         return candles
+        
     except Exception as e:
-        print(f"Error fetching data: {e}")
+        print(f" Error fetching data: {e}")
+        print(f"Error type: {type(e).__name__}")
         return None
 
 # ============================================================
 # تحلیل تکنیکال
 # ============================================================
 def check_asia_range(candles):
-    """بررسی رنج بودن سشن آسیا"""
     asia_candles = [c for c in candles if is_in_asia_session(c["time"])]
     
     if len(asia_candles) < 10:
+        print(f"⚠️ Only {len(asia_candles)} Asia candles (need 10)")
         return False, None, None, None
     
     asia_high = max(c["high"] for c in asia_candles)
@@ -88,18 +96,20 @@ def check_asia_range(candles):
     range_pct = ((asia_high - asia_low) / asia_close) * 100
     
     is_ranging = range_pct < 0.35
+    print(f" Asia Range: {range_pct:.3f}% - {'Ranging' if is_ranging else 'Trending'}")
     return is_ranging, asia_high, asia_low, range_pct
 
 def find_mbox_range(candles):
-    """پیدا کردن بازه MBOX"""
     mbox_candles = [c for c in candles if is_in_mbox(c["time"])]
     
     if len(mbox_candles) < 10:
+        print(f"⚠️ Only {len(mbox_candles)} MBOX candles (need 10)")
         return None
     
     mbox_high = max(c["high"] for c in mbox_candles)
     mbox_low = min(c["low"] for c in mbox_candles)
     
+    print(f" MBOX: {mbox_low:.5f} - {mbox_high:.5f}")
     return {
         "high": mbox_high,
         "low": mbox_low,
@@ -108,7 +118,6 @@ def find_mbox_range(candles):
     }
 
 def detect_choch(candles, lookback=20):
-    """تشخیص CHOCH"""
     choch_events = []
     
     for i in range(lookback, len(candles)):
@@ -122,6 +131,7 @@ def detect_choch(candles, lookback=20):
                 "price": current["close"],
                 "time": current["time"]
             })
+            print(f"📈 Bullish CHOCH at {current['close']:.5f}")
         
         if current["close"] < min(prev_lows):
             choch_events.append({
@@ -129,11 +139,11 @@ def detect_choch(candles, lookback=20):
                 "price": current["close"],
                 "time": current["time"]
             })
+            print(f"📉 Bearish CHOCH at {current['close']:.5f}")
     
     return choch_events
 
 def detect_order_blocks(candles, choch_events, lookback=10):
-    """تشخیص Order Blocks"""
     order_blocks = []
     
     for choch in choch_events:
@@ -151,6 +161,7 @@ def detect_order_blocks(candles, choch_events, lookback=10):
                         "top": candle["open"],
                         "bottom": candle["low"]
                     })
+                    print(f"🟢 Bullish OB found: {candle['low']:.5f} - {candle['open']:.5f}")
                     break
         
         elif choch["type"] == "bearish":
@@ -162,6 +173,7 @@ def detect_order_blocks(candles, choch_events, lookback=10):
                         "top": candle["high"],
                         "bottom": candle["close"]
                     })
+                    print(f"🔴 Bearish OB found: {candle['close']:.5f} - {candle['high']:.5f}")
                     break
     
     return order_blocks
@@ -170,7 +182,7 @@ def detect_order_blocks(candles, choch_events, lookback=10):
 # بررسی ستاپ
 # ============================================================
 def check_magic_box_setup(candles):
-    """بررسی کامل ستاپ Magic Box"""
+    print("\n🔍 Checking Magic Box setup...")
     details = {}
     signals = []
     
@@ -179,23 +191,30 @@ def check_magic_box_setup(candles):
     details["asia_range_pct"] = range_pct
     
     if not is_ranging:
+        print("❌ Asia is not ranging")
         return None, details
     
     mbox = find_mbox_range(candles)
     if not mbox:
+        print("❌ MBOX not found")
         return None, details
     details["mbox"] = mbox
     
     choch_events = detect_choch(candles, lookback=30)
     if not choch_events:
+        print("❌ No CHOCH detected")
         return None, details
     
     order_blocks = detect_order_blocks(candles, choch_events, lookback=10)
     if not order_blocks:
+        print("❌ No Order Blocks detected")
         return None, details
     
     current_price = candles[-1]["close"]
     current_time = candles[-1]["time"]
+    
+    print(f"\n💰 Current price: {current_price:.5f}")
+    print(f"⏰ Current NY time: {to_ny_time(current_time)}")
     
     for ob in order_blocks:
         if ob["bottom"] <= current_price <= ob["top"]:
@@ -208,6 +227,10 @@ def check_magic_box_setup(candles):
                     "take_profit": mbox["high"] if ob["type"] == "bullish" else mbox["low"],
                     "reason": f"{ob['type'].capitalize()} OB retest in SHRED time"
                 })
+                print(f"✅ SIGNAL FOUND: {direction}")
+    
+    if not signals:
+        print("❌ No signals found")
     
     if signals:
         return signals, details
@@ -217,10 +240,9 @@ def check_magic_box_setup(candles):
 # ارسال پیام تلگرام
 # ============================================================
 def send_telegram_message(message):
-    """ارسال پیام به تلگرام"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Error: Telegram credentials not set")
-        return
+        print("❌ Error: Telegram credentials not set")
+        return False
     
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
@@ -230,16 +252,19 @@ def send_telegram_message(message):
     }
     
     try:
+        print("📤 Sending message to Telegram...")
         response = requests.post(url, json=payload, timeout=10)
         if response.status_code == 200:
-            print("✅ Message sent to Telegram")
+            print("✅ Message sent successfully!")
+            return True
         else:
-            print(f"Telegram API error: {response.text}")
+            print(f"❌ Telegram API error: {response.text}")
+            return False
     except Exception as e:
-        print(f"Error sending message: {e}")
+        print(f"❌ Error sending message: {e}")
+        return False
 
 def format_signal_message(signal, details):
-    """فرمت پیام سیگنال"""
     emoji = "🟢" if signal["direction"] == "LONG" else "🔴"
     
     return f"""
@@ -250,22 +275,23 @@ def format_signal_message(signal, details):
 🛑 <b>Stop Loss:</b> {signal["stop_loss"]:.5f}
  <b>Take Profit:</b> {signal["take_profit"]:.5f}
 
- <b>Setup Details:</b>
+📋 <b>Setup Details:</b>
 • Asia Range: {details.get('asia_range_pct', 0):.3f}%
 • MBOX High: {details['mbox']['high']:.5f}
 • MBOX Low: {details['mbox']['low']:.5f}
 
 📝 <b>Reason:</b> {signal["reason"]}
 
-⏰ <b>Time:</b> {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+ <b>Time:</b> {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 """
 
 # ============================================================
 # تابع اصلی
 # ============================================================
 def main():
-    """تابع اصلی"""
-    print("Starting Magic Box Scanner...")
+    print("=" * 50)
+    print(" Starting Magic Box Scanner...")
+    print("=" * 50)
     
     candles = fetch_eurusd_data()
     if not candles:
@@ -273,22 +299,25 @@ def main():
         return
     
     current_time = candles[-1]["time"]
-    print(f"Current NY time: {to_ny_time(current_time)}")
+    ny_time = to_ny_time(current_time)
+    print(f"\n Current NY time: {ny_time}")
+    print(f"🕐 Scanning hours: 02:00 - 12:00 NY")
     
     if not is_scanning_time(current_time):
-        print("⏰ Not in scanning time (02:00-12:00 NY)")
+        print(f" Not in scanning time (current: {ny_time.hour}:00)")
         return
     
-    print("🔍 Checking for Magic Box setup...")
+    print("\n✅ In scanning time - proceeding...")
     signals, details = check_magic_box_setup(candles)
     
     if signals:
+        print(f"\n🎯 {len(signals)} signal(s) found!")
         for signal in signals:
             message = format_signal_message(signal, details)
-            send_telegram_message(message)
-            print(f"✅ Signal sent: {signal['direction']}")
+            if send_telegram_message(message):
+                print(f"✅ Signal sent: {signal['direction']}")
     else:
-        print("❌ No signal found")
+        print("\n❌ No signals found - no message sent")
 
 if __name__ == "__main__":
     main()
