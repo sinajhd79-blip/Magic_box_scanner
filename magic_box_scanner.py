@@ -1,5 +1,6 @@
 import requests
 import os
+import json
 from datetime import datetime, timedelta, timezone
 
 # ============================================================
@@ -35,48 +36,85 @@ def is_scanning_time(dt):
     return 2 <= ny_dt.hour < 12
 
 # ============================================================
-# دریافت داده - نسخه اصلاح شده
+# دریافت داده از Yahoo Finance (رایگان و پایدار)
 # ============================================================
 def fetch_eurusd_data():
-    """دریافت داده EURUSDT از Binance"""
+    """دریافت داده EURUSD از Yahoo Finance"""
     try:
-        url = "https://api.binance.com/api/v3/klines"
+        # Yahoo Finance API برای EURUSD
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X"
         params = {
-            "symbol": "EURUSDT",
+            "range": "2d",
             "interval": "15m",
-            "limit": 200
+            "includePrePost": "false"
         }
         
-        print("📡 Fetching data from Binance...")
-        response = requests.get(url, params=params, timeout=10)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        
+        print("📡 Fetching data from Yahoo Finance...")
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        
+        if response.status_code != 200:
+            print(f"❌ HTTP Error: {response.status_code}")
+            return None
+        
         data = response.json()
         
-        print(f"✅ Received {len(data)} candles")
+        # بررسی ساختار پاسخ
+        if "chart" not in data or "result" not in data["chart"]:
+            print(f"❌ Invalid response structure: {list(data.keys())}")
+            return None
+        
+        result = data["chart"]["result"]
+        if not result:
+            print("❌ Empty result")
+            return None
+        
+        chart_data = result[0]
+        timestamps = chart_data.get("timestamp", [])
+        indicators = chart_data.get("indicators", {})
+        quote = indicators.get("quote", [{}])[0]
+        
+        opens = quote.get("open", [])
+        highs = quote.get("high", [])
+        lows = quote.get("low", [])
+        closes = quote.get("close", [])
+        
+        print(f"✅ Received {len(timestamps)} candles from Yahoo")
         
         candles = []
-        for candle in data:
-            # تبدیل صریح به انواع درست
-            timestamp = int(candle[0])  # تبدیل به int
-            open_price = float(candle[1])
-            high = float(candle[2])
-            low = float(candle[3])
-            close = float(candle[4])
-            volume = float(candle[5])
-            
-            candles.append({
-                "time": datetime.fromtimestamp(timestamp/1000, tz=timezone.utc),
-                "open": open_price,
-                "high": high,
-                "low": low,
-                "close": close,
-                "volume": volume
-            })
+        for i in range(len(timestamps)):
+            try:
+                # بررسی داده‌های معتبر
+                if opens[i] is None or highs[i] is None or lows[i] is None or closes[i] is None:
+                    continue
+                
+                candle_time = datetime.fromtimestamp(timestamps[i], tz=timezone.utc)
+                
+                candles.append({
+                    "time": candle_time,
+                    "open": float(opens[i]),
+                    "high": float(highs[i]),
+                    "low": float(lows[i]),
+                    "close": float(closes[i]),
+                    "volume": 0
+                })
+            except (ValueError, TypeError, IndexError) as e:
+                print(f"⚠️ Skipping invalid candle {i}: {e}")
+                continue
         
-        print(f"✅ Processed {len(candles)} candles")
+        print(f"✅ Processed {len(candles)} valid candles")
+        
+        if len(candles) < 10:
+            print(f"❌ Not enough candles ({len(candles)} < 10)")
+            return None
+        
         return candles
         
     except Exception as e:
-        print(f" Error fetching data: {e}")
+        print(f"❌ Error fetching data: {e}")
         print(f"Error type: {type(e).__name__}")
         return None
 
@@ -96,7 +134,7 @@ def check_asia_range(candles):
     range_pct = ((asia_high - asia_low) / asia_close) * 100
     
     is_ranging = range_pct < 0.35
-    print(f" Asia Range: {range_pct:.3f}% - {'Ranging' if is_ranging else 'Trending'}")
+    print(f"🌏 Asia Range: {range_pct:.3f}% - {'Ranging ✅' if is_ranging else 'Trending ❌'}")
     return is_ranging, asia_high, asia_low, range_pct
 
 def find_mbox_range(candles):
@@ -109,7 +147,7 @@ def find_mbox_range(candles):
     mbox_high = max(c["high"] for c in mbox_candles)
     mbox_low = min(c["low"] for c in mbox_candles)
     
-    print(f" MBOX: {mbox_low:.5f} - {mbox_high:.5f}")
+    print(f"📦 MBOX: {mbox_low:.5f} - {mbox_high:.5f}")
     return {
         "high": mbox_high,
         "low": mbox_low,
@@ -161,7 +199,7 @@ def detect_order_blocks(candles, choch_events, lookback=10):
                         "top": candle["open"],
                         "bottom": candle["low"]
                     })
-                    print(f"🟢 Bullish OB found: {candle['low']:.5f} - {candle['open']:.5f}")
+                    print(f"🟢 Bullish OB: {candle['low']:.5f} - {candle['open']:.5f}")
                     break
         
         elif choch["type"] == "bearish":
@@ -173,7 +211,7 @@ def detect_order_blocks(candles, choch_events, lookback=10):
                         "top": candle["high"],
                         "bottom": candle["close"]
                     })
-                    print(f"🔴 Bearish OB found: {candle['close']:.5f} - {candle['high']:.5f}")
+                    print(f" Bearish OB: {candle['close']:.5f} - {candle['high']:.5f}")
                     break
     
     return order_blocks
@@ -191,7 +229,7 @@ def check_magic_box_setup(candles):
     details["asia_range_pct"] = range_pct
     
     if not is_ranging:
-        print("❌ Asia is not ranging")
+        print("❌ Asia is not ranging - setup invalid")
         return None, details
     
     mbox = find_mbox_range(candles)
@@ -272,7 +310,7 @@ def format_signal_message(signal, details):
 
 📊 <b>Direction:</b> {signal["direction"]}
 💰 <b>Entry:</b> {signal["entry"]:.5f}
-🛑 <b>Stop Loss:</b> {signal["stop_loss"]:.5f}
+ <b>Stop Loss:</b> {signal["stop_loss"]:.5f}
  <b>Take Profit:</b> {signal["take_profit"]:.5f}
 
 📋 <b>Setup Details:</b>
@@ -290,7 +328,7 @@ def format_signal_message(signal, details):
 # ============================================================
 def main():
     print("=" * 50)
-    print(" Starting Magic Box Scanner...")
+    print("🚀 Starting Magic Box Scanner...")
     print("=" * 50)
     
     candles = fetch_eurusd_data()
@@ -301,10 +339,10 @@ def main():
     current_time = candles[-1]["time"]
     ny_time = to_ny_time(current_time)
     print(f"\n Current NY time: {ny_time}")
-    print(f"🕐 Scanning hours: 02:00 - 12:00 NY")
+    print(f"📊 Scanning hours: 02:00 - 12:00 NY")
     
     if not is_scanning_time(current_time):
-        print(f" Not in scanning time (current: {ny_time.hour}:00)")
+        print(f"⏰ Not in scanning time (current hour: {ny_time.hour})")
         return
     
     print("\n✅ In scanning time - proceeding...")
