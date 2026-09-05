@@ -356,6 +356,8 @@ def main():
                 print(f"✅ Signal sent: {signal['direction']}")
     else:
         print("\n❌ No signals found - no message sent")
-
+# پیام تست
+    test_msg = "🧪 <b>Test Message - Magic Box Bot is Working!</b>\n\nربات شما فعال است و کار می‌کند!"
+    send_telegram_message(test_msg)
 if __name__ == "__main__":
     main()
