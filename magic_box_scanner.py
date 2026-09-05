@@ -341,9 +341,9 @@ def main():
     print(f"\n Current NY time: {ny_time}")
     print(f"📊 Scanning hours: 02:00 - 12:00 NY")
     
-    if not is_scanning_time(current_time):
-        print(f"⏰ Not in scanning time (current hour: {ny_time.hour})")
-        return
+    #if not is_scanning_time(current_time):
+        #print(f"⏰ Not in scanning time (current hour: {ny_time.hour})")
+        #return
     
     print("\n✅ In scanning time - proceeding...")
     signals, details = check_magic_box_setup(candles)
